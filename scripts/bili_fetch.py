@@ -33,6 +33,16 @@ REFERER = "https://www.bilibili.com"
 # 30280 = 192k, 30232 = 132k, 30216 = 64k; the API returns what anonymous access allows.
 BEST_AUDIO = 30280
 
+# Windows rejects these characters in a file name; macOS/Linux reject "/" only. Course
+# titles were already sanitised but part titles were not, so a part called "1: 导论"
+# crashed the download when it tried to create the file.
+INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def safe_filename_part(text: str) -> str:
+    """Turn a title into something all three desktop OSes accept as a file name."""
+    return INVALID_FILENAME_CHARS.sub("_", str(text)).strip().rstrip(".")
+
 
 def _curl(url: str, headers: dict[str, str], timeout: int) -> bytes:
     cmd = ["curl", "-sS", "--max-time", str(timeout), "--compressed"]
@@ -118,12 +128,13 @@ def parse_range(spec: str | None, parts: list[dict]) -> list[dict]:
 
 def stem_for(course: str, page: dict) -> str:
     """Match yt-dlp's naming so old and new downloads land side by side."""
-    return f"p{page['page']:02d}_{course} p{page['page']:02d} {page['part']}"
+    return (f"p{page['page']:02d}_{safe_filename_part(course)}"
+            f" p{page['page']:02d} {safe_filename_part(page['part'])}")
 
 
 def fetch_pages(bv: str, cookie: str | None) -> tuple[str, list[dict]]:
     data = api("/x/web-interface/view", {"bvid": bv}, cookie)
-    course = re.sub(r"[\\/:*?\"<>|]", "_", data["title"]).strip()
+    course = safe_filename_part(data["title"])
     return course, data["pages"]
 
 
