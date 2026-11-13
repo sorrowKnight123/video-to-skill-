@@ -6,6 +6,9 @@ notes/
 .cache/
 cookies.txt
 
+# 资料清单含网盘分享链接与提取码，属用户资料，不入库
+materials/
+
 # Generated example personas are kept on purpose (see examples/), but a persona you
 # build for yourself in a study workspace usually should not be committed either.
 # skills/*/references/分P笔记/

@@ -9,6 +9,7 @@ So this is the fallback for that case, and it needs no cookies for public videos
     python bili_fetch.py list  BV1xxxxxxxxx                 # what parts exist
     python bili_fetch.py audio BV1xxxxxxxxx -I 4-24         # download audio only
     python bili_fetch.py subs  BV1xxxxxxxxx -I 1-3          # turn subtitles into transcripts
+    python bili_fetch.py resources BV1xxxxxxxxx             # find shared material links
 
 Tier 1 of the subtitle/ASR ladder (`subs`) and the download step both live here.
 `transcribe.py` then handles the audio -> text tiers.
@@ -375,6 +376,245 @@ def cmd_subs(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------ resources
+
+# Share-ID character class: `[A-Za-z0-9_-]`, never `\w` -- in Python `\w` matches CJK,
+# so a pan link followed directly by Chinese text (".../s/1abc2def链接如下") would swallow
+# the words into the match. Same reason the generic URL body excludes CJK, quotes and
+# full-width brackets: PPT 导出的分享文本里链接后面经常直接跟中文或全角括号。
+NETDISK_PATTERNS = (
+    ("百度网盘", r"https?://pan\.baidu\.com/s/[A-Za-z0-9_-]+"),
+    ("蓝奏云", r"https?://[A-Za-z0-9.-]*lanzou[a-z]?\.com/[A-Za-z0-9_-]+"),
+    ("夸克网盘", r"https?://pan\.quark\.cn/s/[A-Za-z0-9_-]+"),
+    ("阿里云盘", r"https?://(?:www\.)?(?:aliyundrive|alipan)\.com/s/[A-Za-z0-9_-]+"),
+    ("123云盘", r"https?://(?:www\.)?123pan\.(?:com|cn)/s/[A-Za-z0-9_-]+"),
+    ("天翼云盘", r"https?://cloud\.189\.cn/[a-z]/[A-Za-z0-9]+"),
+    ("微云", r"https?://share\.weiyun\.com/[A-Za-z0-9_-]+"),
+)
+URL_GENERIC = r"https?://[^\s\u4e00-\u9fff<>\"'（）)\]]+"
+# Codes ride along in the URL (?pwd=) or in the surrounding text. 4-8 chars: 百度 4 位、
+# 夸克/天翼可能更长。
+CODE_PATTERNS = (
+    r"[?&]pwd=([A-Za-z0-9]{4})",
+    r"(?:提取码|密码|访问码)[:：=\s]*([A-Za-z0-9]{4,8})",
+)
+
+
+def classify(url: str) -> tuple[str, str] | None:
+    """(类型, 标签) for one URL. None = not course material, skip it.
+
+    B站站内视频链接（b23.tv、/video/BV）是"下一讲"，不是资料，跳过；站内专栏保留。
+    """
+    host_m = re.match(r"https?://([^/]+)", url)
+    host = (host_m.group(1).lower() if host_m else "").removeprefix("www.")
+    if host.endswith("b23.tv"):
+        return None
+    if host == "bilibili.com":
+        if re.search(r"/video/|/festival/|/bangumi/|/cheese/", url):
+            return None
+        return "其他", "B站专栏"
+    for label, pat in NETDISK_PATTERNS:
+        if re.match(pat, url):
+            return "网盘", label
+    if re.search(r"\.(?:pdf|zip|rar|7z|docx?|pptx?|xlsx?)(?:[?#]|$)", url, re.I):
+        return "直链文件", host
+    if re.match(r"https?://(?:www\.)?(?:github|gitee)\.com/", url):
+        return "代码仓库", host
+    return "其他", host
+
+
+def code_in_url(url: str) -> str | None:
+    m = re.search(r"[?&]pwd=([A-Za-z0-9]{4})", url)
+    return m.group(1) if m else None
+
+
+def extract_resources(text: str) -> list[dict]:
+    """Pull shareable course-material links out of one blob of text.
+
+    One blob = the description or a single comment. Codes are paired only within the
+    same blob (a code in a different comment almost certainly belongs to a different
+    link); when a blob has several links, each gets the code nearest to it.
+    """
+    spans: list[tuple[int, int, str]] = []
+    for _, pat in NETDISK_PATTERNS:
+        for m in re.finditer(pat, text):
+            spans.append((m.start(), m.end(), m.group(0)))
+    for m in re.finditer(URL_GENERIC, text):
+        if not any(s <= m.start() < e for s, e, _ in spans):
+            spans.append((m.start(), m.end(), m.group(0)))
+    codes = [(m.start(), m.group(1)) for pat in CODE_PATTERNS for m in re.finditer(pat, text)]
+
+    out: list[dict] = []
+    remaining = sorted(codes)  # (position, code)
+    for start, _, url in sorted(spans):
+        kind = classify(url)
+        if not kind:
+            continue
+        typ, label = kind
+        code = code_in_url(url)
+        if not code and remaining:
+            # Links and codes normally appear in reading order ("链接A ... 提取码：x
+            # 链接B ... 密码：y"), so each link takes the nearest unused code to its
+            # right; a code printed *before* the link still gets picked up by the
+            # anywhere-fallback.
+            right = [c for c in remaining if c[0] >= start]
+            pool = right or remaining
+            chosen = min(pool, key=lambda c: c[0] - start)
+            remaining.remove(chosen)
+            code = chosen[1]
+        out.append({"type": typ, "label": label, "url": url, "code": code})
+    return out
+
+
+def fetch_file(url: str, target: Path, cookie: str | None) -> int:
+    """Download one direct-link file (never a netdisk share). Returns size in bytes."""
+    headers = {"User-Agent": UA, "Referer": REFERER}
+    if cookie:
+        headers["Cookie"] = cookie
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=300) as r:
+            with target.open("wb") as fh:
+                while chunk := r.read(1 << 20):
+                    fh.write(chunk)
+    except urllib.error.HTTPError as e:
+        if e.code != 412:
+            raise SystemExit(f"[error] download failed: HTTP {e.code} ({url[:80]})")
+        if not shutil.which("curl"):
+            raise
+        print("[info] 412 from Python client; retrying this download through curl", file=sys.stderr)
+        cmd = ["curl", "-sSfL", "--max-time", "900"]
+        for key, value in headers.items():
+            cmd += ["-H", f"{key}: {value}"]
+        subprocess.run(cmd + ["-o", str(target), url], check=True)
+    size = target.stat().st_size
+    if size == 0:
+        target.unlink(missing_ok=True)
+        raise SystemExit(f"[error] downloaded 0 bytes: {url[:80]}")
+    return size
+
+
+def collect_texts(args, bv: str) -> tuple[str, list[tuple[str, str]]]:
+    """(course title, [(来源标注, 文本)]) from the description, pinned and hot comments."""
+    data = api("/x/web-interface/view", {"bvid": bv}, args.cookie)
+    texts = [("简介", data.get("desc") or "")]
+    aid = data["aid"]
+
+    # 置顶评论优先且单独标注；热评走新接口（旧 /x/v2/reply 的 pn 翻页已失效，只回第一页）。
+    reply = api("/x/v2/reply/main", {"type": 1, "oid": aid, "mode": 3, "next": 0, "ps": 20},
+                args.cookie)
+    for r in reply.get("top_replies") or []:
+        texts.append(("置顶评论", r["content"]["message"]))
+    for r in reply.get("replies") or []:
+        texts.append((f"热评(赞{r.get('like', 0)})", r["content"]["message"]))
+    cursor = reply.get("cursor") or {}
+    for page in range(2, args.pages + 1):
+        if cursor.get("is_end") or not cursor.get("next"):
+            break
+        if page > 1 and args.delay:
+            time.sleep(args.delay)
+        reply = api("/x/v2/reply/main",
+                    {"type": 1, "oid": aid, "mode": 3, "next": cursor["next"], "ps": 20},
+                    args.cookie)
+        for r in reply.get("replies") or []:
+            texts.append((f"热评(赞{r.get('like', 0)})", r["content"]["message"]))
+        cursor = reply.get("cursor") or {}
+    return data.get("title") or bv, texts
+
+
+def cmd_resources(args) -> int:
+    """Find course-material links in the description and pinned/hot comments.
+
+    Listing is read-only. --fetch downloads direct-link files only, after the user has
+    agreed -- netdisk shares are printed with their codes for the user to open, because
+    automating those means login flows, captchas and anti-abuse walls.
+    """
+    bv = parse_bv(args.url)
+    outdir = Path(args.outdir)
+    blobs: list[tuple[str, str]] = []
+
+    title, texts = collect_texts(args, bv)
+    blobs += texts
+
+    if args.season:
+        data = api("/x/web-interface/view", {"bvid": bv}, args.cookie)
+        season = data.get("ugc_season") or {}
+        episodes = [ep for sec in season.get("sections") or [] for ep in sec.get("episodes") or []]
+        if not episodes:
+            print("[warn] --season: this video does not belong to a collection", file=sys.stderr)
+        for i, ep in enumerate([e for e in episodes if e.get("bvid") != bv], 1):
+            if args.delay:
+                time.sleep(args.delay)
+            try:
+                ep_data = api("/x/web-interface/view", {"bvid": ep["bvid"]}, args.cookie)
+                blobs.append((f"合集·{ep_data.get('title') or ep.get('title', '')}",
+                              ep_data.get("desc") or ""))
+                ep_reply = api("/x/v2/reply/main",
+                               {"type": 1, "oid": ep_data["aid"], "mode": 3, "next": 0, "ps": 20},
+                               args.cookie)
+                for r in ep_reply.get("top_replies") or []:
+                    blobs.append((f"合集·{ep_data.get('title') or ''}置顶", r["content"]["message"]))
+            except SystemExit as e:
+                print(f"  [warn] 合集第 {i} 个分P 跳过: {e}", file=sys.stderr)
+                continue
+            print(f"\r  合集扫描 {i}/{len(episodes) - 1}", end="", flush=True)
+    print()
+
+    merged: dict[str, dict] = {}
+    for source, text in blobs:
+        for r in extract_resources(text):
+            key = re.sub(r"^https?://", "", r["url"]).rstrip("/").lower()
+            entry = merged.setdefault(key, {**r, "sources": []})
+            if source not in entry["sources"]:
+                entry["sources"].append(source)
+            if not entry.get("code") and r.get("code"):
+                entry["code"] = r["code"]
+    if not merged:
+        print("[none] 简介和评论里没有发现可提取的资料链接")
+        return 0
+
+    order = {"网盘": 0, "直链文件": 1, "代码仓库": 2, "其他": 3}
+    rows = sorted(merged.values(), key=lambda r: (order.get(r["type"], 9), r["type"], r["url"]))
+    print(f"{title}\n")
+    for i, r in enumerate(rows, 1):
+        code = f"  提取码: {r['code']}" if r["code"] else ""
+        print(f"{i}. [{r['type']}·{r['label']}] {' / '.join(r['sources'])}{code}")
+        print(f"   {r['url']}")
+
+    outdir.mkdir(parents=True, exist_ok=True)
+    now = time.strftime("%Y-%m-%d %H:%M")
+    (outdir / "_resources.json").write_text(
+        json.dumps({"bvid": bv, "title": title, "generated_at": now, "count": len(rows),
+                    "resources": [{**r, "url_key": k} for k, r in merged.items()]},
+                   ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    lines = [f"# 配套资料 · {title}", "",
+             f"> 来源：BV {bv} 的简介与评论区（{now}）。网盘链接需要你自己打开；",
+             "> 分享可能随时失效，本清单只负责\"找到了\"。", ""]
+    for i, r in enumerate(rows, 1):
+        lines.append(f"{i}. **[{r['type']}·{r['label']}]** {' / '.join(r['sources'])}")
+        lines.append(f"   <{r['url']}>")
+        if r["code"]:
+            lines.append(f"   提取码：`{r['code']}`")
+        lines.append("")
+    (outdir / "资料清单.md").write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n[done] {len(rows)} 条资料 -> {outdir / '资料清单.md'}")
+
+    if args.fetch:
+        direct = [r for r in rows if r["type"] == "直链文件"]
+        if not direct:
+            print("[info] --fetch: 没有可自动下载的直链文件；网盘链接请自行打开")
+            return 0
+        print(f"\n[fetch] 下载 {len(direct)} 个直链文件 -> {outdir / '资料'}/")
+        for i, r in enumerate(direct, 1):
+            name = urllib.parse.unquote(
+                urllib.parse.urlparse(r["url"]).path.rsplit("/", 1)[-1]) or f"material_{i}"
+            print(f"  [{i}/{len(direct)}] {name}")
+            size = fetch_file(r["url"], outdir / "资料" / name, args.cookie)
+            print(f"   {size / 1e6:.1f} MB")
+        print(f"\n[done] 直链文件在 {outdir / '资料'}/，可用 materials.py 直接解析成课件笔记")
+    return 0
+
+
 def main() -> int:
     if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -383,7 +623,9 @@ def main() -> int:
     for name, fn, helptext in (("list", cmd_list, "list the parts"),
                                ("audio", cmd_audio, "download audio"),
                                ("verify", cmd_verify, "check local downloads for truncation"),
-                               ("subs", cmd_subs, "save the video's own subtitles as transcripts")):
+                               ("subs", cmd_subs, "save the video's own subtitles as transcripts"),
+                               ("resources", cmd_resources,
+                                "find shared course-material links in the description and pinned/hot comments")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("url", help="BV id, or any URL containing one")
         p.add_argument("--cookie", help="extra Cookie header, e.g. 'SESSDATA=...' (only needed for login-gated content)")
@@ -394,7 +636,19 @@ def main() -> int:
                            help="parallel CDN downloads (default: 1). Higher values corrupted "
                                 "the audio in testing -- bilibili's CDN returns bad frames when "
                                 "pulled concurrently, and the file size still looks right.")
-        if name != "list":
+        if name == "resources":
+            p.add_argument("--pages", type=int, default=1,
+                           help="hot-comment pages to scan, 20 comments each (default: 1)")
+            p.add_argument("--season", action="store_true",
+                           help="also scan the description and pinned comment of every episode "
+                                "in the collection (2 requests each)")
+            p.add_argument("--fetch", action="store_true",
+                           help="download direct-link files after listing (ask the user first). "
+                                "Netdisk shares are never downloaded -- they are listed with "
+                                "their codes for you to open")
+            p.add_argument("-o", "--outdir", default="materials",
+                           help="where 资料清单.md goes (default: materials)")
+        elif name != "list":
             p.add_argument("-I", "--items", default="all", help="parts to fetch, e.g. 4-24 or 1,3,5 (default: all)")
             p.add_argument("-o", "--outdir", default="transcripts" if name == "subs" else "downloads")
             p.add_argument("--force", action="store_true", help="redo files that already exist")

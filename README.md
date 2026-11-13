@@ -24,6 +24,10 @@ python scripts/bili_fetch.py list BV1xxxxxxxxx
 # 3. 下音频 + 转写（国内先设镜像，见下方「常见问题」）
 python scripts/bili_fetch.py audio BV1xxxxxxxxx -I 1-5 -o downloads
 python scripts/transcribe.py downloads/ -o transcripts
+
+# 自动挖术语纠错表（有课件更好；先看证据表再落盘）
+python scripts/glossary.py transcripts/ --reference <知识库>/references/课件笔记     -o 术语表.auto.json
+python scripts/transcribe.py --apply-glossary 术语表.auto.json transcripts/ --dry-run
 ```
 
 然后在 ZCode 里说：「帮我把这门课做成知识库 `https://www.bilibili.com/video/BV1xxxxxxxxx`」，
@@ -80,6 +84,7 @@ transcripts/  downloads/             # 原始字幕与音频（已 gitignore，�
 | `bili_fetch.py audio <BV> -I 4-24 -o downloads` | 下音频（串行 + 解码校验） |
 | `bili_fetch.py verify <BV> -o downloads` | 校验本地音频是否完整 |
 | `bili_fetch.py subs <BV> -I 1-3 -o transcripts` | 把原生字幕存成和转写同格式的 `.md/.txt` |
+| `bili_fetch.py resources <BV> -o materials` | 从简介/置顶/热评发现配套资料链接；`--fetch` 经确认后只下直链文件，网盘只给链接+提取码 |
 | `transcribe.py downloads/ -o transcripts` | 转写（`--engine auto\|cloud\|local`） |
 | `transcribe.py --check` | 自检设备与模型 |
 | `transcribe.py --apply-glossary 词表.json transcripts/ --dry-run` | 术语纠错（先看命中再落盘） |
@@ -154,6 +159,19 @@ firefox 那个 profile 从没用过。
 
 **cookie 属于账号凭据，不要写进仓库、不要贴进对话。**
 
+### 找到的网盘资料为什么不能自动下载
+
+网盘下载要过登录、验证码和风控，自动化不可靠，而且行为和爬虫难以区分。
+所以 `bili_fetch.py resources` 只负责**发现**：把链接和提取码列成清单
+（`materials/资料清单.md`）；你确认后加 `--fetch` 也只下载**直链文件**
+（pdf/zip/压缩包这类不用登录的），网盘的请自己打开。
+
+发现范围默认是当前视频的简介、置顶评论和热评；`--season` 可以把合集里其他分P 的
+简介和置顶也扫一遍（很多 UP 主把资料包挂在合集第一集的置顶里）。分享链接随时可能
+失效，脚本只负责"找到了"——打不开就是失效了，这不是脚本的错。
+
+`materials/` 整个目录已被 gitignore：资料清单里有你的网盘链接和提取码，别提交。
+
 ## 依赖
 
 | 依赖 | 什么时候需要 | 安装 |
@@ -168,6 +186,24 @@ PPTX / DOCX / MD / TXT 课件**不需要任何额外依赖**（用标准库解�
 
 skill 只报告缺什么、给出安装命令，**不会替你静默安装**；也不会静默上传你的文件。
 
+## 核心思路：不拼模型，拼可审计的词表
+
+ASR 对中文专业术语的错**不是随机的，是同音替换**——谐振子被听成斜阵子/邪真子/协真子，
+傅里叶变换被听成复利液变换，正确写法常常一次都没出现。这意味着它**可以被机械修正**。
+
+实测（同一门课、同一段音频）：
+
+| 方案 | 术语命中 | 体积 | 速度 |
+|---|---|---|---|
+| whisper-turbo 原始 | 71% | 1.6GB | 20× 实时 |
+| **whisper-turbo + 自动词表** | **100%** | **+0GB** | **20× 实时** |
+| Qwen3-ASR-1.7B | 94% | +6.5GB | 3.4× 实时 |
+
+`glossary.py` 用两个信号挖候选：**同音**（拼音相同、字不同）和**差一字**；
+配对对象是「转录里罕见的词」×「课件里的词 or 转录里高频的词」。三道闸压噪声
+（错法不得在课件出现过、两侧必须是极大 n-gram、候选不含虚词），
+可选再让对话模型逐条裁决。全程可审计：每条都带证据表。
+
 ## 设计取舍（明确没做的事）
 
 - **不读视频画面**（抽帧/OCR/视觉模型）：明显更慢更贵，用**课件**补这个缺口。
@@ -175,6 +211,14 @@ skill 只报告缺什么、给出安装命令，**不会替你静默安装**；�
 - **不做** MCP server、GUI、配置文件（用 CLI 参数）、向量库 RAG、思维导图。
 - **不做**学习者状态跟踪（掌握度、复习队列、错误本）——那是带教系统的领域。
 - **只做 B 站**：换平台等真有第二个需求再说。
+
+### 为什么默认不用 Qwen3-ASR
+
+Qwen3-ASR-1.7B 中文术语确实更准（实测同一段课程音频：术语命中 94% vs Whisper 的 71%），
+但代价是**慢 5.9 倍**（3.4× 实时 vs 20×）、体积 6.5GB、时间戳要额外挂对齐模型再自己拼句，
+而且 `hf_hub_download` 在国内镜像下直接不可用、`qwen-asr` 自 2026-01 停更。
+术语准确率我们用词表纠错就能拿到（同一段音频里 Whisper 错的那 4 个术语，词表全修掉了），
+成本近乎零。**所以它不做默认引擎**；需要极限术语准确率时再考虑做成可选引擎。
 
 ## 目录结构
 
@@ -185,6 +229,7 @@ skills/bilibili-persona/SKILL.md       工作流（阶段 0–7）
 commands/learn-course.md               /learn-course <BV号>
 scripts/bili_fetch.py                  列分P / 下音频 / 存原生字幕
 scripts/transcribe.py                  转写（云/本地）+ 术语纠错
+scripts/glossary.py                    自动挖掘术语纠错词表（拼音信号，无需 API）
 scripts/materials.py                   课件解析（本地优先，扫描件可走云 OCR）
 scripts/mock_asr.py                    假 ASR 服务，验证云链路
 personas/_methods/                     三个教学法叠加层模板
