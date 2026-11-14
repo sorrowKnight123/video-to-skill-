@@ -214,6 +214,12 @@ CSS = """
 @media (prefers-color-scheme:dark){:root{--bg:#191713;--fg:#e8e4d9;--muted:#95908a;
 --line:#33302a;--accent:#d9927f;--accent-soft:#3a241d;--code:#211f1b}}
 *{box-sizing:border-box}
+:root{color-scheme:light dark}
+*{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 body{margin:0;background:var(--bg);color:var(--fg);
 font-family:var(--serif);font-size:17px;line-height:1.95;letter-spacing:.015em}
 .layout{display:flex;align-items:flex-start}
