@@ -420,6 +420,13 @@ def cmd_html(args) -> int:
     course = load_course(args.course) or {}
     files = note_files(args.targets)
     entries = []
+    if args.overview:
+        ov = Path(args.overview)
+        if ov.exists():
+            ov_title, ov_body, ov_toc = render_file(ov)
+            entries.append((0, ov, ov_title, ov_body, ov_toc))
+        else:
+            print(f"[warn] overview not found: {args.overview}", file=sys.stderr)
     for path in files:
         part = part_of(path)
         if part is None:
@@ -433,7 +440,7 @@ def cmd_html(args) -> int:
 
     nav = [f'<div class="meta">共 {len(entries)} 讲 · 点时间戳回原视频</div>']
     for part, path, title, _body, toc in entries:
-        label = f"{part:02d} {title.split('讲 ', 1)[-1] if '讲 ' in title else title}"
+        label = "课程总览" if part == 0 else f"{part:02d} {title.split('讲 ', 1)[-1] if '讲 ' in title else title}"
         nav.append(f'<a class="lec" href="#p{part:02d}">{html.escape(label)}</a>')
 
     body = []
@@ -483,6 +490,7 @@ def main() -> int:
     p.add_argument("targets", nargs="+")
     p.add_argument("-o", "--output", default="复习页.html")
     p.add_argument("--course", help="course.json（含 bv/title）")
+    p.add_argument("--overview", help="课程总览 md（如大纲.md），渲染在所有讲次之前")
     p.set_defaults(func=cmd_html)
 
     args = ap.parse_args()
