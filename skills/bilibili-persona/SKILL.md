@@ -205,6 +205,39 @@ python "<插件根>/scripts/materials.py" 扫描件.pdf --cloud-ocr
 **知识库的三条纪律**：条目化不逐句转录；每条尽量带时间点或课页锚点；
 没有依据的内容标出来，别和讲过的内容混在一起。
 
+## 阶段 4.5 · 时间戳与复习页（让笔记能点回原视频）
+
+复习笔记的价值一半在「能跳回原片」。参考项目 BiliLearn-AI 靠内置播放器做这件事
+（`TimeLink.vue` 点击后 emit 给播放器 seek），插件形态没有播放器，所以换成**链接**：
+点 `00:12:34` 直接开浏览器跳到那一秒。
+
+### 硬规则：每条必带时间戳
+
+- 六个正文小节（概念/公式/推导/例题/易混与坑/考点）下的**每个列表项**（含 `1. 2.` 有序项）
+  都必须以 `` `HH:MM:SS` `` 结尾（反引号是约定，`link` 只认这个，不会误伤标题里的时长）
+- 时间戳**只能取自 `transcripts/*.md` 里真实存在的那一行**，不许估、不许写「附近」
+- 没有对应时刻的**归纳性/结构性内容，写成自然段**（段落豁免），不要为了过 lint 硬挂一个假时间
+- `` `MM:SS` `` 两段式不合格：它无法区分「52 秒」和「52 分」，必须补成三段式
+
+### 三条命令
+
+```bash
+# 1. 生成分P清单（含 BV，供链接拼接用）
+python "<插件根>/scripts/bili_fetch.py" list <BV号> --json -o course.json
+
+# 2. 把反引号时间戳改写成 B 站链接（先 dry-run 看改动）
+python "<插件根>/scripts/stamp.py" link <知识库>/references/讲义 --course course.json --dry-run
+python "<插件根>/scripts/stamp.py" link <知识库>/references/讲义 --course course.json
+
+# 3. 校验 + 出单页复习笔记
+python "<插件根>/scripts/stamp.py" lint <知识库>/references/讲义
+python "<插件根>/scripts/stamp.py" html <知识库>/references/讲义 -o 复习页.html --course course.json
+```
+
+`lint` 有缺口时退出码非 0（`--warn` 只报告不失败，给旧笔记用）。
+`html` 产出一个**自包含**单文件：内联 CSS、无 CDN、无 JS 库、无外部字体，断网可读；
+时间戳是 chip 样式，点开跳 B 站；公式保持 Unicode 原文（不引 KaTeX，因为我们不用 LaTeX）。
+
 ## 阶段 5 · 蒸馏人格（可选产物，默认不启用）
 
 人格**分两层写**，缺一层都会退化——只有风格层就是个模仿秀，只有判断层就是个教科书。

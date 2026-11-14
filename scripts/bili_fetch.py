@@ -131,6 +131,22 @@ def fetch_pages(bv: str, cookie: str | None) -> tuple[str, list[dict]]:
 def cmd_list(args) -> int:
     bv = parse_bv(args.url)
     course, pages = fetch_pages(bv, args.cookie)
+    if getattr(args, "json", False):
+        manifest = {
+            "bv": bv,
+            "title": course,
+            "pages": [
+                {"page": p["page"], "cid": p["cid"], "title": p["part"], "duration": p["duration"]}
+                for p in pages
+            ],
+        }
+        text = json.dumps(manifest, ensure_ascii=False, indent=2) + chr(10)
+        if args.out:
+            Path(args.out).write_text(text, encoding="utf-8")
+            print(f"[done] {args.out}  {len(pages)} 分P")
+        else:
+            sys.stdout.write(text)
+        return 0
     total = sum(p["duration"] for p in pages)
     print(f"{course}  ({bv}, {len(pages)} 分P, {total // 3600}h{total % 3600 // 60:02d}m)\n")
     print(f"{'#':>3}  {'时长':>7}  {'cid':>12}  标题")
@@ -631,6 +647,10 @@ def main() -> int:
         p.add_argument("--cookie", help="extra Cookie header, e.g. 'SESSDATA=...' (only needed for login-gated content)")
         p.add_argument("--delay", type=float, default=1.0,
                        help="seconds between API requests (default: 1; raise it if you start getting HTTP 412)")
+        if name == "list":
+            p.add_argument("--json", action="store_true",
+                           help="emit a manifest (bv/title/pages) instead of the table, for stamp.py")
+            p.add_argument("-o", "--out", help="with --json: write the manifest here instead of stdout")
         if name == "audio":
             p.add_argument("--workers", type=int, default=1,
                            help="parallel CDN downloads (default: 1). Higher values corrupted "

@@ -75,12 +75,14 @@ transcripts/  downloads/             # 原始字幕与音频（已 gitignore，�
 | **读课件** | PDF/PPTX/DOCX/MD/TXT 本地解析；扫描件可选走云 OCR；补上「不读视频画面」丢的公式 |
 | **知识库与人格分离** | 人格生成但默认不启用；还支持叠加教学法（严格推导 / 直觉类比 / 考点导向） |
 | **可溯源** | 讲义条目带 `mm:ss`，有人格的带原话证据；缺证据的地方明确标注而不是编 |
+| **时间戳笔记** | 每条知识点绑真实时间戳，点一下跳回 B 站那一秒；`lint` 强制不许缺、不许编 |
+| **单页复习笔记** | 一个自包含 `.html`（内联 CSS、无 CDN、断网可读）：侧栏目录 + 时间戳可点 + 三线表 |
 
 ## 命令参考
 
 | 命令 | 作用 |
 |---|---|
-| `bili_fetch.py list <BV>` | 列分P（序号/时长/cid/标题） |
+| `bili_fetch.py list <BV>` | 列分P（序号/时长/cid/标题）；`--json -o course.json` 输出清单给 `stamp.py` 用 |
 | `bili_fetch.py audio <BV> -I 4-24 -o downloads` | 下音频（串行 + 解码校验） |
 | `bili_fetch.py verify <BV> -o downloads` | 校验本地音频是否完整 |
 | `bili_fetch.py subs <BV> -I 1-3 -o transcripts` | 把原生字幕存成和转写同格式的 `.md/.txt` |
@@ -89,6 +91,9 @@ transcripts/  downloads/             # 原始字幕与音频（已 gitignore，�
 | `transcribe.py --check` | 自检设备与模型 |
 | `transcribe.py --apply-glossary 词表.json transcripts/ --dry-run` | 术语纠错（先看命中再落盘） |
 | `materials.py <课件目录> -o <知识库>/references/课件笔记` | 解析课件 |
+| `stamp.py link <讲义目录> --course course.json` | 把 `` `00:12:34` `` 改写成 B 站跳转链接（`--dry-run` 先看） |
+| `stamp.py lint <讲义目录>` | 检查每条知识点是否带时间戳，缺了就退出码非 0 |
+| `stamp.py html <讲义目录> -o 复习页.html` | 生成自包含单页复习笔记 |
 | `mock_asr.py` | 本地假 ASR 服务，无密钥验证云转写链路 |
 
 `bili_fetch.py` 还有个 `--delay`（默认 1 秒，被限流就调大）和 `--workers`（默认 1，
@@ -209,6 +214,8 @@ ASR 对中文专业术语的错**不是随机的，是同音替换**——谐振
 - **不读视频画面**（抽帧/OCR/视觉模型）：明显更慢更贵，用**课件**补这个缺口。
 - **不重造轮子**：分块/VAD/纠错/字幕渲染生态里已有成熟实现，我们只做「知识库 + 讲师人格」。
 - **不做** MCP server、GUI、配置文件（用 CLI 参数）、向量库 RAG、思维导图。
+- **不做内置播放器**：插件形态没有宿主 UI 可挂，做播放器就得自带一个 web app。
+  等价且更轻的做法是把时间戳做成 B 站链接——点开浏览器跳到同一秒，任何编辑器里都能用。
 - **不做**学习者状态跟踪（掌握度、复习队列、错误本）——那是带教系统的领域。
 - **只做 B 站**：换平台等真有第二个需求再说。
 
@@ -229,6 +236,7 @@ skills/bilibili-persona/SKILL.md       工作流（阶段 0–7）
 commands/learn-course.md               /learn-course <BV号>
 scripts/bili_fetch.py                  列分P / 下音频 / 存原生字幕
 scripts/transcribe.py                  转写（云/本地）+ 术语纠错
+scripts/stamp.py                       时间戳链接化 + 强绑检查 + 单页复习笔记
 scripts/glossary.py                    自动挖掘术语纠错词表（拼音信号，无需 API）
 scripts/materials.py                   课件解析（本地优先，扫描件可走云 OCR）
 scripts/mock_asr.py                    假 ASR 服务，验证云链路
