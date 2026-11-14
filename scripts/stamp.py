@@ -207,57 +207,56 @@ def cmd_lint(args) -> int:
 # --------------------------------------------------------------------------- html
 
 CSS = """
-:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#6b7280;--line:#e3e0d8;--accent:#0f766e;
---accent-soft:#e6f4f1;--code:#f1efe9;--warn:#9a3412;--warn-soft:#fff4ed}
-@media (prefers-color-scheme:dark){:root{--bg:#16181c;--fg:#e6e6e3;--muted:#9aa0a6;
---line:#2b2f36;--accent:#5eead4;--accent-soft:#12352f;--code:#21252b;--warn:#fdba74;
---warn-soft:#3a2216}}
+:root{--bg:#faf7f0;--fg:#26241f;--muted:#8b8478;--line:#e6e1d3;--accent:#9a3324;
+--accent-soft:#f1e3de;--code:#f2efe6;--serif:Georgia,"Times New Roman","Adobe 宋体 Std L",
+"华文中宋","宋体",serif;--sans:"Segoe UI","Microsoft YaHei UI","Noto Sans SC",sans-serif;
+--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#191713;--fg:#e8e4d9;--muted:#95908a;
+--line:#33302a;--accent:#d9927f;--accent-soft:#3a241d;--code:#211f1b}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);line-height:1.78;
-font-family:system-ui,-apple-system,"Segoe UI","Noto Sans SC","PingFang SC",
-"Microsoft YaHei",sans-serif;font-size:16px}
+body{margin:0;background:var(--bg);color:var(--fg);
+font-family:var(--serif);font-size:17px;line-height:1.95;letter-spacing:.015em}
 .layout{display:flex;align-items:flex-start}
-.side{position:sticky;top:0;width:270px;height:100vh;overflow:auto;padding:28px 18px;
-border-right:1px solid var(--line);font-size:13.5px}
-.side h1{font-size:15px;margin:0 0 4px}
-.side .meta{color:var(--muted);font-size:12px;margin-bottom:18px}
-.side a{display:block;color:var(--fg);text-decoration:none;padding:3px 8px;border-radius:5px}
-.side a:hover{background:var(--accent-soft);color:var(--accent)}
-.side .lec{margin:14px 0 2px;font-weight:600}
-.side .sec{padding-left:18px;color:var(--muted);font-size:12.5px}
-.main{flex:1;min-width:0;max-width:860px;margin:0 auto;padding:44px 40px 80px}
-h1{font-size:26px;margin:0 0 6px;letter-spacing:.3px}
-h2{font-size:18px;margin:38px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
-h3{font-size:15.5px;margin:24px 0 8px}
-.src{color:var(--muted);font-size:12.5px;margin:0 0 22px;padding-left:10px;
-border-left:3px solid var(--line)}
-ul,ol{padding-left:22px;margin:8px 0}
-li{margin:5px 0}
-li>ul{margin:4px 0}
+.side{position:sticky;top:0;width:250px;height:100vh;overflow:auto;padding:30px 20px;
+border-right:1px solid var(--line);font-family:var(--sans);font-size:12.5px;
+background:#f4f0e5}
+@media (prefers-color-scheme:dark){.side{background:#1d1a16}}
+.side h1{font-family:var(--serif);font-size:15px;line-height:1.5;margin:0 0 4px;color:var(--fg)}
+.side .meta{color:var(--muted);font-size:11.5px;margin-bottom:20px;font-family:var(--sans)}
+.side a{display:block;color:var(--muted);text-decoration:none;padding:2.5px 8px;border-radius:4px}
+.side a:hover{color:var(--accent);background:var(--accent-soft)}
+.side a.lec{color:var(--fg);font-weight:600;margin:10px 0 2px}
+.main{flex:1;min-width:0;max-width:46rem;margin:0 auto;padding:64px 44px 90px}
+h1{font-family:"华文中宋","Adobe 宋体 Std L",var(--serif);font-size:2rem;font-weight:400;
+line-height:1.45;margin:0 0 12px}
+strong{font-weight:600}
+h2{font-family:var(--sans);font-size:13.5px;font-weight:600;letter-spacing:.18em;
+color:var(--accent);margin:3.4em 0 1.4em;padding-bottom:9px;border-bottom:1px solid var(--line)}
+h3{font-family:var(--sans);font-size:12.5px;font-weight:600;letter-spacing:.1em;
+color:var(--muted);margin:2.2em 0 .9em}
+p{margin:1.15em 0}
+ul,ol{padding-left:1.5em;margin:1em 0 1.3em}
+li{margin:.72em 0}
+li>ul,li>ol{margin:.45em 0}
+li::marker{color:var(--muted)}
 a{color:var(--accent)}
-a.ts{display:inline-block;padding:0 6px;margin-left:2px;border-radius:6px;
-background:var(--accent-soft);color:var(--accent);font-size:.82em;line-height:1.6;
-font-family:ui-monospace,SFMono-Regular,Consolas,monospace;text-decoration:none;
-border:1px solid transparent;white-space:nowrap}
-a.ts:hover{border-color:var(--accent)}
-code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.88em;
-font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
-blockquote{margin:14px 0;padding:2px 0 2px 14px;border-left:3px solid var(--accent);
-color:var(--muted)}
-section.sec-考点{border-left:3px solid var(--warn);padding-left:16px;margin-left:-19px}
-section.sec-考点 h2{border-bottom-color:var(--warn);color:var(--warn)}
-section.sec-考点 h2::after{content:"考点";font-size:11px;margin-left:8px;padding:1px 6px;
-border-radius:4px;background:var(--warn-soft);color:var(--warn);vertical-align:2px}
-table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px}
-th,td{padding:7px 12px;text-align:left;vertical-align:top}
-thead th{border-top:2px solid var(--fg);border-bottom:1px solid var(--fg);font-weight:600}
-tbody tr:last-child td{border-bottom:2px solid var(--fg)}
-.foot{margin-top:56px;padding-top:14px;border-top:1px solid var(--line);
-color:var(--muted);font-size:12.5px}
-@media (max-width:900px){.layout{display:block}.side{position:static;width:auto;
-height:auto;border-right:0;border-bottom:1px solid var(--line)}.main{padding:28px 20px 60px}}
+a.ts{display:inline-block;padding:0 2px;margin:0 1px;color:var(--accent);opacity:.78;
+font-size:.76em;font-family:var(--mono);line-height:1.5;text-decoration:none}
+a.ts:hover{opacity:1;background:var(--accent-soft);border-radius:3px}
+code{background:var(--code);padding:1px 6px;border-radius:3px;font-size:.82em;
+font-family:var(--mono)}
+.src{color:var(--muted);font-size:13px;line-height:1.75;margin:0 0 30px;padding:0 0 4px 14px;
+border-left:2px solid var(--line);font-family:var(--sans)}
+section.sec-考点 h2{color:var(--warn);border-bottom-color:var(--warn)}
+section.sec-考点 h2::after{content:"考点";font-size:10px;margin-left:10px;padding:1px 7px;
+border-radius:3px;background:var(--warn-soft);color:var(--warn);letter-spacing:.2em}
+.foot{margin-top:64px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);
+font-size:12px;font-family:var(--sans)}
+hr{border:0;border-top:1px solid var(--line);margin:2.6em 0}
+@media (max-width:900px){.layout{display:block}.side{position:static;width:auto;height:auto;
+border-right:0;border-bottom:1px solid var(--line)}.main{padding:34px 22px 60px}}
 @media print{.side{display:none}.main{max-width:none;padding:0}
-a.ts{background:none;color:#000;border:0;padding:0}}
+a.ts{color:#000;border:0;padding:0}}
 """
 
 
@@ -430,8 +429,6 @@ def cmd_html(args) -> int:
     for part, path, title, _body, toc in entries:
         label = f"{part:02d} {title.split('讲 ', 1)[-1] if '讲 ' in title else title}"
         nav.append(f'<a class="lec" href="#p{part:02d}">{html.escape(label)}</a>')
-        for name, anchor in toc:
-            nav.append(f'<a class="sec" href="#{anchor}">{html.escape(name)}</a>')
 
     body = []
     for part, path, title, content, _toc in entries:
