@@ -16,6 +16,7 @@ a link works from any editor, any chat, any browser.
 import argparse
 import html
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ SECTION_KEYS = ("概念", "公式", "推导", "例题", "易混", "考点")
 TS_RE = re.compile(r"`(\d{1,2}:\d{2}:\d{2})`")
 TS_ANY_RE = re.compile(r"`(\d{1,2}:\d{2}:\d{2})`|\[(\d{1,2}:\d{2}:\d{2})\]\(https?://")
 ITEM_RE = re.compile(r"^(\s*)([-*]|\d+[.)])\s+(.*)$")
+IMG_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$")
 
 
 # --------------------------------------------------------------------------- time
@@ -256,6 +258,9 @@ border-left:2px solid var(--line);font-family:var(--sans)}
 section.sec-考点 h2{color:var(--warn);border-bottom-color:var(--warn)}
 section.sec-考点 h2::after{content:"考点";font-size:10px;margin-left:10px;padding:1px 7px;
 border-radius:3px;background:var(--warn-soft);color:var(--warn);letter-spacing:.2em}
+figure.fig{margin:1.8em 0;text-align:center}
+figure.fig img{max-width:100%;border:1px solid var(--line);border-radius:6px;background:#fff}
+figure.fig figcaption{color:var(--muted);font-size:12px;font-family:var(--sans);margin-top:8px}
 .foot{margin-top:64px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);
 font-size:12px;font-family:var(--sans)}
 hr{border:0;border-top:1px solid var(--line);margin:2.6em 0}
@@ -286,8 +291,12 @@ def inline_md(text: str) -> str:
     return "".join(out)
 
 
-def render_file(path: Path) -> tuple[str, str, list[tuple[str, str]]]:
-    """Return (lecture_title, body_html, [(section_name, anchor_id)])."""
+def render_file(path: Path, html_dir: Path | None = None) -> tuple[str, str, list[tuple[str, str]]]:
+    """Return (lecture_title, body_html, [(section_name, anchor_id)]).
+
+    html_dir: where the generated html will live, so `![..](../images/x.png)` written
+    relative to the note can be rewritten relative to the page.
+    """
     lines = path.read_text(encoding="utf-8").splitlines()
     title = path.stem
     body: list[str] = []
@@ -371,6 +380,21 @@ def render_file(path: Path) -> tuple[str, str, list[tuple[str, str]]]:
             close_lists()
             body.append(f"<h3>{inline_md(line[4:].strip())}</h3>")
             continue
+        m = IMG_RE.match(line.strip())
+        if m:
+            flush_para()
+            close_lists()
+            raw = Path(m.group(2))
+            full = (path.parent / raw).resolve()
+            if not full.exists():
+                print(f"[warn] {path.name}: 插图不存在 {raw}", file=sys.stderr)
+            src = (os.path.relpath(full, html_dir).replace("\\", "/")
+                   if html_dir else raw.as_posix())
+            alt = m.group(1).strip()
+            cap = f"<figcaption>{html.escape(alt, quote=False)}</figcaption>" if alt else ""
+            body.append(f'<figure class="fig"><img src="{html.escape(src, quote=True)}" '
+                        f'alt="{html.escape(alt, quote=False)}" loading="lazy">{cap}</figure>')
+            continue
         if line.lstrip().startswith("|"):
             flush_para()
             close_lists()
@@ -418,12 +442,14 @@ def render_file(path: Path) -> tuple[str, str, list[tuple[str, str]]]:
 
 def cmd_html(args) -> int:
     course = load_course(args.course) or {}
+    out = Path(args.output)
+    html_dir = out.parent.resolve()
     files = note_files(args.targets)
     entries = []
     if args.overview:
         ov = Path(args.overview)
         if ov.exists():
-            ov_title, ov_body, ov_toc = render_file(ov)
+            ov_title, ov_body, ov_toc = render_file(ov, html_dir)
             entries.append((0, ov, ov_title, ov_body, ov_toc))
         else:
             print(f"[warn] overview not found: {args.overview}", file=sys.stderr)
@@ -431,7 +457,7 @@ def cmd_html(args) -> int:
         part = part_of(path)
         if part is None:
             continue
-        title, body, toc = render_file(path)
+        title, body, toc = render_file(path, html_dir)
         entries.append((part, path, title, body, toc))
     if not entries:
         print("[error] 没找到讲义（文件名需要 NN- 前缀）", file=sys.stderr)
@@ -460,7 +486,6 @@ def cmd_html(args) -> int:
 无外部依赖。公式以 Unicode 文本呈现。</p>
 </main></div></body></html>
 """
-    out = Path(args.output)
     out.write_text(doc, encoding="utf-8")
     size = out.stat().st_size / 1024
     print(f"[done] {out}  {len(entries)} 讲  {size:.0f} KB")
